@@ -196,7 +196,7 @@ def train_model(model, optimizer, train_loader, optim_cfg,
 
                 ckpt_name = ckpt_save_dir / ('checkpoint_epoch_%d' % trained_epoch)
                 save_checkpoint(
-                    checkpoint_state(model, optimizer, trained_epoch, accumulated_iter), filename=ckpt_name,
+                    checkpoint_state(model, optimizer, trained_epoch, accumulated_iter), filename=ckpt_name,wandb=wandb
                 )
 
             # eval the model
@@ -276,7 +276,7 @@ def checkpoint_state(model=None, optimizer=None, epoch=None, it=None):
     return {'epoch': epoch, 'it': it, 'model_state': model_state, 'optimizer_state': optim_state, 'version': version}
 
 
-def save_checkpoint(state, filename='checkpoint'):
+def save_checkpoint(state, filename='checkpoint', wandb=None):
     if False and 'optimizer_state' in state:
         optimizer_state = state['optimizer_state']
         state.pop('optimizer_state', None)
@@ -285,3 +285,20 @@ def save_checkpoint(state, filename='checkpoint'):
 
     filename = '{}.pth'.format(filename)
     torch.save(state, filename)
+
+    wandb_run = wandb.get('run', None) if wandb and wandb.get('WANDB', False) else None
+
+    if wandb_run is not None:
+        artifact = wb.Artifact(name=f"checkpoint_epoch_{state['epoch']}", 
+                    type="model",
+                    description=f"Model checkpoint at epoch {state['epoch']}, iteration {state['it']}")
+        
+        artifact.add_file(filename)
+        wandb_run.log_artifact(artifact)
+    
+    pass
+        
+    
+
+
+
