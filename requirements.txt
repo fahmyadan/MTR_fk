@@ -1,5 +1,5 @@
 numpy
-typing_extensions=>4.5
+typing_extensions==4.5
 # torch>=1.1
 tensorboardX
 easydict
