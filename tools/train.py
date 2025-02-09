@@ -22,7 +22,7 @@ from mtr.utils import common_utils
 from mtr.models import model as model_utils
 
 from train_utils.train_utils import train_model
-
+import wandb
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -227,6 +227,17 @@ def main():
     # -----------------------start training---------------------------
     logger.info('**********************Start training %s/%s(%s)**********************'
                 % (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+     # -----------------------init_wandb---------------------------
+    
+    if cfg.LOGGING['WANDB']:
+        current_time = datetime.datetime.now()
+        run_time = current_time.strftime('%m-%d_%H-%M')
+        run_name = cfg.LOGGING["NAME"] + f'_{run_time}' 
+        wandb_dir = output_dir /'wandb'
+        wandb_run = wandb.init(entity=cfg.LOGGING["ENTITY"], project= cfg.LOGGING["PROJECT"], name = run_name, dir=wandb_dir, config=cfg)
+        cfg.LOGGING.update({'run': wandb_run})
+
+
     train_model(
         model,
         optimizer,
@@ -247,7 +258,8 @@ def main():
         eval_output_dir=eval_output_dir,
         test_loader=test_loader if not args.not_eval_with_train else None,
         cfg=cfg, dist_train=dist_train, logger_iter_interval=args.logger_iter_interval,
-        ckpt_save_time_interval=args.ckpt_save_time_interval
+        ckpt_save_time_interval=args.ckpt_save_time_interval, 
+        wandb=cfg.LOGGING
     )
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'

@@ -9,11 +9,12 @@ import os
 import torch
 import tqdm
 from torch.nn.utils import clip_grad_norm_
+import wandb as wb
 
 
 def train_one_epoch(model, optimizer, train_loader, accumulated_iter, optim_cfg,
                     rank, tbar, total_it_each_epoch, dataloader_iter, tb_log=None, leave_pbar=False, scheduler=None, show_grad_curve=False,
-                    logger=None, logger_iter_interval=50, cur_epoch=None, total_epochs=None, ckpt_save_dir=None, ckpt_save_time_interval=300):
+                    logger=None, logger_iter_interval=50, cur_epoch=None, total_epochs=None, ckpt_save_dir=None, ckpt_save_time_interval=300, wandb= False):
     if total_it_each_epoch == len(train_loader):
         dataloader_iter = iter(train_loader)
 
@@ -90,6 +91,9 @@ def train_one_epoch(model, optimizer, train_loader, accumulated_iter, optim_cfg,
                     for key, val in model.named_parameters():
                         key = key.replace('.', '/')
                         tb_log.add_scalar('train_grad/' + key, val.grad.abs().max().item(), accumulated_iter)
+            if wandb["WANDB"]:
+                log_wandb(wandb, tb_dict, accumulated_iter,model, show_grad_curve, cur_lr, total_norm, train=True)
+                # log_wandb(wandb, tb_dict, cur_lr, total_norm, tb_dict, accumulated_iter, model, show_grad_curve, train=True)
 
             time_past_this_epoch = pbar.format_dict['elapsed']
             if time_past_this_epoch // ckpt_save_time_interval >= ckpt_save_cnt:
@@ -118,12 +122,36 @@ def learning_rate_decay(i_epoch, optimizer, optim_cfg):
             for p in optimizer_2.param_groups:
                 p['lr'] *= 0.3
 
+def log_wandb(wandb, tb_dict, epoch, model= None, show_grad_curve= None,cur_lr=None, total_norm=None, train=False):
+
+    wandb_run = wandb.get('run', None)
+    assert isinstance(wandb_run, wb.sdk.wandb_run.Run), "WandB run not initialized correctly"
+
+    if not train: 
+        wandb_dict = {}
+        wandb_dict.update({f'eval/{k}': v for k, v in tb_dict.items()})
+    else:
+        wandb_dict = {
+            'meta_data/learning_rate': cur_lr,
+            'train/total_norm': total_norm
+        }
+        # Add training metrics
+        wandb_dict.update({f'train/{k}': v for k, v in tb_dict.items()})
+
+    # Add gradient info if requested
+    if show_grad_curve and model is not None:
+        grad_dict = {f'train_grad/{k.replace(".", "/")}': v.grad.abs().max().item() 
+                    for k, v in model.named_parameters()}
+        wandb_dict.update(grad_dict)
+        
+    wandb_run.log(wandb_dict, step=epoch)
+
 
 def train_model(model, optimizer, train_loader, optim_cfg,
                 start_epoch, total_epochs, start_iter, rank, ckpt_save_dir, train_sampler=None,
                 ckpt_save_interval=1, max_ckpt_save_num=50, merge_all_iters_to_one_epoch=False, tb_log=None,
                 scheduler=None, test_loader=None, logger=None, eval_output_dir=None, cfg=None, dist_train=False,
-                logger_iter_interval=50, ckpt_save_time_interval=300):
+                logger_iter_interval=50, ckpt_save_time_interval=300, wandb=False):
     accumulated_iter = start_iter
     with tqdm.trange(start_epoch, total_epochs, desc='epochs', dynamic_ncols=True, leave=(rank == 0)) as tbar:
         total_it_each_epoch = len(train_loader)
@@ -151,7 +179,8 @@ def train_model(model, optimizer, train_loader, optim_cfg,
                 dataloader_iter=dataloader_iter,
                 scheduler=scheduler, cur_epoch=cur_epoch, total_epochs=total_epochs,
                 logger=logger, logger_iter_interval=logger_iter_interval,
-                ckpt_save_dir=ckpt_save_dir, ckpt_save_time_interval=ckpt_save_time_interval
+                ckpt_save_dir=ckpt_save_dir, ckpt_save_time_interval=ckpt_save_time_interval, 
+                wandb=wandb
             )
 
             # save trained model
@@ -183,6 +212,9 @@ def train_model(model, optimizer, train_loader, optim_cfg,
                 if cfg.LOCAL_RANK == 0:
                     for key, val in tb_dict.items():
                         tb_log.add_scalar('eval/' + key, val, trained_epoch)
+                    
+                    if wandb["WANDB"]:
+                        log_wandb(wandb, tb_dict, trained_epoch)
 
                     if 'mAP' in tb_dict:
                         best_record_file = eval_output_dir / ('best_eval_record.txt')
